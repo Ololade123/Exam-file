@@ -1,0 +1,154 @@
+---
+
+- name: setup server
+  hosts: webservers
+  environment:
+        AWS_ACCESS_KEY_ID: "[AKIA2ISCRA3OZ7BM2W7Y]"
+        AWS_SECRET_ACCESS_KEY: "[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]"
+  tasks:
+        - name: install packages
+          become: true
+          apt:
+                pkg:
+                    - php8.1-cli
+                    - php-xml
+                    - php-pgsql
+                    - libapache2-mod-php
+                    - apache2
+                    - git
+                    - zip
+                    - unzip
+                    - curl
+                    - php-curl
+
+        - name: Install mariadb python dependency
+          package:
+              name: python3-mysqldb
+              state: latest
+          become: true
+
+        - name: Install mariadb
+          package:
+              name: default-mysql-server
+              state: latest
+          become: true
+
+        - name: Create a Database
+          mysql_db:
+              login_user: 'root'
+              login_password: ""
+              name: db
+              state: present
+              login_unix_socket: /var/run/mysqld/mysqld.sock
+          become: true
+
+        - name: Create a Database User
+          mysql_user:
+              name: db
+              password: Lollypop123
+              login_user: root
+              login_password: ""
+              login_unix_socket: /run/mysqld/mysqld.sock
+          become: true
+
+        - name: download composer installer
+          get_url:
+              url: https://getcomposer.org/installer
+              dest: /tmp/composer
+
+        - name: install composer
+          shell: php /tmp/composer --install-dir=/usr/local/bin
+          become: yes
+
+        - name: rename composer executable
+          shell: mv /usr/local/bin/composer.phar /usr/local/bin/composer
+          become: yes
+
+        - name: set permissions for composer file
+          file:
+              path: /usr/local/bin/composer
+              mode: a+x
+              state: file
+          become: yes
+
+        - name: clone laravel codebase
+          git:
+              repo: https://github.com/laravel/laravel.git
+              dest: /var/www/myapp
+              force: yes
+          become: yes
+
+        - name: take ownership of myapp folder
+          file:
+              path: /var/www/myapp
+              owner: "{{ ansible_effective_user_id }}"
+              group: "{{ ansible_effective_group_id }}"
+          become: yes
+
+        - name: set permissions for Laravel storage folder
+          file:
+              path: /var/www/myapp/storage
+              state: directory
+              recurse: yes
+              mode: '0777'
+          become: yes
+
+        - name: install laravel dependencies
+          composer:
+              command: update
+              working_dir: /var/www/myapp
+
+        - name: copy env file
+          copy:
+              src: /var/www/myapp/.env.example
+              remote_src: yes
+              dest: /var/www/myapp/.env
+              owner: "{{ ansible_effective_user_id }}"
+              group: "{{ ansible_effective_group_id }}"
+              mode: '0644'
+          become: yes
+
+        - name: copy apache config
+          copy:
+              src: stubs/myapp.conf
+              dest: /etc/apache2/sites-available/myapp.conf
+              owner: "{{ ansible_effective_user_id }}"
+              group: "{{ ansible_effective_group_id }}"
+              mode: '0644'
+          become: yes
+
+        - name: set server name
+          replace:
+              path: /etc/apache2/sites-available/myapp.conf
+              regexp: '$SERVER_NAME'
+              replace: '{{ ansible_host }}'
+          become: yes
+
+        - name: enable the new config
+          shell: |
+              a2ensite myapp.conf
+              a2dissite 000-default.conf
+              a2enmod rewrite
+              service apache2 restart
+          become: yes
+
+        - name: setup laravel
+          shell: |
+              cd /var/www/myapp
+              php artisan key:generate
+          become: yes
+
+        - name: install python package
+          apt: name="python3-certbot-apache" update_cache=yes state=latest
+          become: yes
+
+        - name: create and install certbot using apache plugin
+          command: certbot --apache -d ololade-project.me -m loladeogundijo@gmail.com --agree -tos
+          become: true
+
+        - name: restart apache
+          service:
+              name: apache2
+              state: restarted
+          become: true
+
